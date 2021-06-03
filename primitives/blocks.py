@@ -8,8 +8,8 @@ from crypto.hashing import dsha256
 class BlockHeader(object):
     parent_hash: str = ''
     beneficiary: str = ''
-    state_root: str = ''
-    tx_root: str = ''
+    state_root_hash: str = ''
+    tx_root_hash: str = ''
     target: int = 0
     heigth: int = 0
     timestamp: datetime.datetime = datetime.datetime.utcnow()
@@ -29,9 +29,9 @@ class BlockHeader(object):
         self.heigth = height
         self.timestamp = timestamp.replace(microsecond=0)
         if state_root:
-            self.state_root = state_root
+            self.state_root_hash = state_root
         if tx_root:
-            self.tx_root = tx_root
+            self.tx_root_hash = tx_root
         if comment:
             self.comment = comment
         if nonce:
@@ -41,7 +41,7 @@ class BlockHeader(object):
 
     def __repr__(self):
         return f'{type(self).__name__}({self.parent_hash}, {self.beneficiary}, {self.target}, {self.heigth},' \
-               f'{self.timestamp}, {self.state_root}, {self.tx_root}, {self.comment}, {self.nonce})'
+               f'{self.timestamp}, {self.state_root_hash}, {self.tx_root_hash}, {self.comment}, {self.nonce})'
 
     @staticmethod
     def json_parser_hook(dump: dict):
@@ -74,8 +74,8 @@ class BlockHeader(object):
                 'target': self.target,
                 'height': self.heigth,
                 'timestamp': int(self.timestamp.timestamp()),
-                'state_root': self.state_root,
-                'tx_root': self.tx_root,
+                'state_root': self.state_root_hash,
+                'tx_root': self.tx_root_hash,
                 'comment': self.comment,
                 'nonce': self.nonce
             })
@@ -86,8 +86,8 @@ class BlockHeader(object):
                 'target': self.target,
                 'height': self.heigth,
                 'timestamp': int(self.timestamp.timestamp()),
-                'state_root': self.state_root,
-                'tx_root': self.tx_root,
+                'state_root': self.state_root_hash,
+                'tx_root': self.tx_root_hash,
                 'comment': self.comment,
                 'nonce': self.nonce
             })
@@ -102,10 +102,6 @@ class Block(object):
     @property
     def hash(self):
         return self.header.hash
-
-    @property
-    def valid(self):
-        return True
 
     def mine(self):
         while int(self.hash, 16) > self.header.target:
@@ -135,10 +131,10 @@ class Block(object):
         self.header = header
         self.transactions = transactions
 
-        if self.header.tx_root:
-            assert self.header.tx_root == self.compute_tx_merkle_root()
+        if self.header.tx_root_hash:
+            assert self.header.tx_root_hash == self.compute_tx_merkle_root()
         else:
-            self.header.tx_root = self.compute_tx_merkle_root()
+            self.header.tx_root_hash = self.compute_tx_merkle_root()
 
     def __repr__(self):
         return f'{type(self).__name__}({self.header}, {len(self.transactions)} txs)'

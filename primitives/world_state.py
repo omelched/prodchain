@@ -1,18 +1,14 @@
 from enum import Enum
 from typing import Union
+import copy
 
 from crypto.hashing import dsha256
+from crypto.signatures import check_signature_ecdsa
 from mpt import MerklePatriciaTrie
 from primitives.accounts import Account
-from primitives.assets import Asset, AssetOwnershipType, CREATE_ASSET, CURRENCY_ASSET
-
-
-class WorldStateModification(Enum):
-    add_asset_to_account = 0x00
-    sub_asset_from_account = 0x01
-    create_asset = 0xf0
-    delete_asset = 0xf1
-    update_asset = 0xf2
+from primitives.assets import Asset, AssetOwnershipType, CREATE_ASSET, CURRENCY_ASSET, AssetStatus, UPDATE_ASSET
+from primitives.transactions import Transaction, TransactionTypes
+from primitives.world_state_modifications import WorldStateModificationType
 
 
 class WorldState(object):
@@ -34,10 +30,6 @@ class WorldState(object):
 
         self._accounts_trie = MerklePatriciaTrie(self._accounts_storage)
         self._assets_trie = MerklePatriciaTrie(self._assets_storage)
-        self._default_state()
-
-    def _default_state(self):
-        ...
 
     def _register_account_modification(self, account: Account):
         assert isinstance(account, Account)
@@ -55,26 +47,55 @@ class WorldState(object):
         self._assets_trie.update(key, asset.state_hash)
         self._assets[key] = asset
 
-    def _register_asset_deletion(self, asset: Asset):
-        assert isinstance(asset, Asset)
+    def account_exists(self, account_name: Union[str, bytes]) -> bool:
+        if isinstance(account_name, str):
+            account_name = account_name.encode('utf-8')
+        return account_name in self._accounts
 
-        key = asset.name.encode('utf-8')
+    def execute_tx(self, tx: Transaction):
+        """Executes tx against current state and returns modified copy.
 
-        self._assets_trie.delete(key)
-        del self._assets[key]
+        Deepcopies current state,
+        atomizes tx in sequence of WorldStateModification and payload keywords,
+        tries to execute them.
 
-    def execute_state_modification(self, height: int, author_name: str, modification: WorldStateModification, **kwargs):
+        :param tx: transaction to be executed
+        :type tx: Transaction
+        :return: world state
+        :rtype: WorldState
+        """
+        _new_world_state = copy.deepcopy(self)  # FIXME: may eat the fuck up RAM eventualy
+
+        instructions = tx.atomize()
+
+        for instruction in instructions:
+            try:
+                _new_world_state._execute_state_modification(instruction[0], **instruction[1])
+            except Exception:
+                raise
+
+        return _new_world_state
+
+    def _execute_state_modification(self, modification: WorldStateModificationType, **kwargs):
+        """Executes arbitrary state modification instruction on self state.
+
+        :param author_name:
+        :param modification:
+        :param kwargs:
+        :return:
+        """
         # TODO: switch to Structural Pattern Matching as soon as python3.10 released
-        if modification == WorldStateModification.add_asset_to_account:
-            assert all(k in ('account_name', 'asset', 'ownership_type', 'amount') for k in kwargs)
+        if modification == WorldStateModificationType.add_asset_to_account:
 
-            account_name = kwargs['account_name']
+            account_name = kwargs['account']
             assert isinstance(account_name, (str, bytes))
             if isinstance(account_name, str):
-                account_name.encode('utf-8')
+                account_name = account_name.encode('utf-8')
 
-            asset = kwargs['asset']
-            assert isinstance(asset, Asset)
+            asset_name = kwargs['asset']
+            assert isinstance(asset_name, (str, bytes))
+            if isinstance(asset_name, str):
+                asset_name = asset_name.encode('utf-8')
 
             ownership_type = kwargs['ownership_type']
             assert isinstance(ownership_type, AssetOwnershipType)
@@ -88,22 +109,30 @@ class WorldState(object):
                 account = Account(account_name)
 
             try:
+                asset = self._assets[asset_name]
+            except KeyError:
+                raise
+
+            assert asset.status in [AssetStatus.active]
+
+            try:
                 account.add_asset(asset, ownership_type, amount)
             except Exception:
                 raise
 
             self._register_account_modification(account)
 
-        elif modification == WorldStateModification.sub_asset_from_account:
-            assert all(k in ('account_name', 'asset', 'ownership_type', 'amount') for k in kwargs)
+        elif modification == WorldStateModificationType.sub_asset_from_account:
 
-            account_name = kwargs['account_name']
+            account_name = kwargs['account']
             assert isinstance(account_name, (str, bytes))
             if isinstance(account_name, str):
-                account_name.encode('utf-8')
+                account_name = account_name.encode('utf-8')
 
-            asset = kwargs['asset']
-            assert isinstance(asset, Asset)
+            asset_name = kwargs['asset']
+            assert isinstance(asset_name, (str, bytes))
+            if isinstance(asset_name, str):
+                asset_name = asset_name.encode('utf-8')
 
             ownership_type = kwargs['ownership_type']
             assert isinstance(ownership_type, AssetOwnershipType)
@@ -117,34 +146,40 @@ class WorldState(object):
                 raise
 
             try:
+                asset = self._assets[asset_name]
+            except KeyError:
+                raise
+
+            assert asset.status in [AssetStatus.active]
+
+            try:
                 account.sub_asset(asset, ownership_type, amount)
             except Exception:
                 raise
 
             self._register_account_modification(account)
 
-        elif modification == WorldStateModification.create_asset:
-            assert all(k in ('name', 'type', 'active') for k in kwargs)
-            if not height == 0:
-                try:
-                    author = self._accounts[author_name.encode('utf-8')]
-                except KeyError:
-                    raise
-
-                assert author.check_asset(CREATE_ASSET, AssetOwnershipType.owner)
-
-                asset = Asset(kwargs['name'], kwargs['type'], kwargs['active'])
-
-                self._register_asset_modification(asset)
-
-            else:
-                asset = Asset(kwargs['name'], kwargs['type'], kwargs['active'])
-
-                self._register_asset_modification(asset)
-
-        elif modification == WorldStateModification.update_asset:
+        elif modification == WorldStateModificationType.create_asset:
+            # assert all(k in ('name', 'type', 'status') for k in kwargs)
+            # if not height == 0:
+            #     try:
+            #         author = self._accounts[author_name.encode('utf-8')]
+            #     except KeyError:
+            #         raise
+            #
+            #     assert author.check_asset(CREATE_ASSET, AssetOwnershipType.owner)
+            #
+            #     asset = Asset(kwargs['name'], kwargs['type'], kwargs['active'])
+            #
+            #     self._register_asset_modification(asset)
+            #
+            # else:
+            #     asset = Asset(kwargs['name'], kwargs['type'], kwargs['active'])
+            #
+            #     self._register_asset_modification(asset)
             raise NotImplementedError
-        elif modification == WorldStateModification.delete_asset:
+
+        elif modification == WorldStateModificationType.update_asset:
             raise NotImplementedError
         else:
             raise RuntimeError
@@ -168,3 +203,18 @@ class WorldState(object):
 
         self._register_account_modification(account)
 
+    def prepare_for_genesis(self, me: str):
+
+        self._register_asset_modification(CURRENCY_ASSET)
+        self._register_asset_modification(CREATE_ASSET)
+        self._register_asset_modification(UPDATE_ASSET)
+        self._execute_state_modification(WorldStateModificationType.add_asset_to_account,
+                                         account=me,
+                                         asset=CREATE_ASSET.name,
+                                         ownership_type=AssetOwnershipType.owner,
+                                         amount=1)
+        self._execute_state_modification(WorldStateModificationType.add_asset_to_account,
+                                         account=me,
+                                         asset=UPDATE_ASSET.name,
+                                         ownership_type=AssetOwnershipType.owner,
+                                         amount=1)

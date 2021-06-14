@@ -7,7 +7,7 @@ from primitives.world_state_modifications import WorldStateModificationType
 from primitives.assets import AssetOwnershipType
 
 
-class TransactionTypes(Enum):
+class TransactionType(Enum):
     # simple transfer
     transfer = '00'
 
@@ -34,7 +34,7 @@ class TransactionTypes(Enum):
 
 
 class Transaction(object):
-    tx_type: TransactionTypes = None
+    tx_type: TransactionType = None
     sender: str = None
     receiver: str = None
     payload: dict = {}
@@ -42,12 +42,12 @@ class Transaction(object):
     pub_key: str = None
 
     @property
-    def hash(self):
+    def hash(self) -> str:
         return dsha256(self.dump('json-raw'))
 
-    def __init__(self, tx_type: TransactionTypes, sender: str, reciever: Union[str, None], payload: dict,
+    def __init__(self, tx_type: TransactionType, sender: str, reciever: Union[str, None], payload: dict,
                  signature: str, pub_key: str, nonce: int):
-        assert isinstance(tx_type, TransactionTypes)
+        assert isinstance(tx_type, TransactionType)
         self.tx_type = tx_type
         self.sender = sender
         self.receiver = reciever
@@ -67,7 +67,7 @@ class Transaction(object):
                                        'payload', 'signature', 'pub_key', 'nonce'))
 
         tx = Transaction(
-            TransactionTypes(int(dump['tx_type'], 16)),
+            TransactionType(int(dump['tx_type'], 16)),
             dump['sender'],
             dump['reciever'],
             json.loads(dump['payload']),
@@ -110,7 +110,7 @@ class Transaction(object):
         :return: tuple of modifications types and values to execute them
         :rtype: ttuple[tuple[WorldStateModificationType, dict[str, Union[str, int]]], ...]
         """
-        if self.tx_type.name == TransactionTypes.transfer.name:
+        if self.tx_type.name == TransactionType.transfer.name:
             assert all(k in ('recipient', 'asset', 'ownership_type', 'amount') for k in self.payload)
             return (
                 (

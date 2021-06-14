@@ -1,12 +1,10 @@
-import datetime
-from typing import Union
 import copy
+import datetime
 from typing import Optional
 
-from primitives.blocks import Block, BlockHeader, Transaction
-from primitives.assets import CURRENCY_ASSET, CREATE_ASSET, UPDATE_ASSET, AssetOwnershipType
-from primitives.world_state import WorldState, WorldStateModificationType
 from crypto import dsha256, check_signature_ecdsa
+from primitives.blocks import Block, BlockHeader, Transaction
+from primitives.world_state import WorldState
 
 
 class BlockChain(object):
@@ -39,6 +37,16 @@ class BlockChain(object):
         except IndexError:
             return None
 
+    @property
+    def height(self) -> int:
+        """Returns current chain height.
+
+        :return: current blockchain height
+        :rtype: int
+        """
+
+        return len(self.chain)
+
     def __init__(self, chain: list[Block] = None, state: WorldState = None) -> None:
         """Initialization of blockchain.
 
@@ -56,11 +64,15 @@ class BlockChain(object):
             self._add_genesis_block()
         else:
             assert isinstance(state, WorldState), TypeError
-            assert state.root_hash == chain[-1].header.state_root_hash
+            assert state.state_roots_hash == chain[-1].header.state_root_hash
             assert self._validate_chain(chain)
 
             self.chain = chain
             self._state = state
+
+    def __getitem__(self, item):
+        assert isinstance(item, int)
+        return self.chain[item]
 
     def _add_genesis_block(self) -> None:
         """Adds genesis block to blockchain.
@@ -83,7 +95,7 @@ class BlockChain(object):
                 target=28269553036454149273332760011886696253239742350009903329945699220681916415,
                 height=0,
                 timestamp=datetime.datetime.utcnow(),
-                state_root=self._state.root_hash,
+                state_root=self._state.state_roots_hash,
                 comment='init'
             ),
             transactions
@@ -120,7 +132,7 @@ class BlockChain(object):
             - every next block has block.height == prev_block.height + 1
             - every next block has block.header.parent_hash == prev_block.hash
             - every next block has block.header.timestamp > prev_block.header.timestamp
-            - every next block has block.header.timestamp <= prev_block.header.timestamp + 10 min
+            - every next block has block.header.timestamp <= prev_block.header.timestamp + 60 min
             - every block has block.header.tx_root_hash == merkle_hash(block.transactions)
             - target check ... (not implemented) # TODO
 
@@ -131,7 +143,7 @@ class BlockChain(object):
         :return: None
         """
         header_pairs = tuple((it[1].header, chain[it[0]].header) for it in enumerate(chain[1:]))
-        ten_minutes = datetime.timedelta(minutes=10)
+        timedelta = datetime.timedelta(hours=1)
 
         assert isinstance(chain, list)
         assert len(chain) > 1
@@ -140,8 +152,8 @@ class BlockChain(object):
         assert all((pair[0].heigth - pair[1].heigth == 1 for pair in header_pairs))
         assert all((pair[0].parent_hash == pair[1].hash for pair in header_pairs))
         assert all((pair[0].timestamp > pair[1].timestamp for pair in header_pairs))
-        assert all((pair[0].timestamp <= pair[1].timestamp + ten_minutes for pair in header_pairs))
-        assert all(block.header.tx_root_hash == block.compute_tx_merkle_root() for block in chain)
+        assert all((pair[0].timestamp <= pair[1].timestamp + timedelta for pair in header_pairs))
+        assert all(block.header.tx_root_hash == block.tx_root for block in chain)
 
     def _validate_block(self, block: Block, prev_block: Block, world_state: WorldState) -> WorldState:
         """Validates arbitraty block on some arbitraty parent block and arbitraty state of blockchain.
@@ -151,11 +163,11 @@ class BlockChain(object):
             - block.header.height == prev_block.header.height - 1
             - block.header.parent_hash == prev_block.hash
             - block.header.timestamp > prev_block.header.timestamp
-            - block.header.timestamp <= prev_block.header.timestamp + 10 min
+            - block.header.timestamp <= prev_block.header.timestamp + 60 min
             - target check ... (not implemented) # TODO
             - block.header.tx_root_hash == merkle_hash(block.transactions)
             - validate all txs <there all txs are executed and new state calculated>
-            - state_after_txs.root_hash = block.header.root_hash
+            - state_after_txs.state_roots_hash = block.header.state_roots_hash
 
         :param block: block to be validated
         :type block: Block
@@ -172,15 +184,15 @@ class BlockChain(object):
             assert block.header.heigth == prev_block.header.heigth - 1
             assert block.header.parent_hash == prev_block.hash
             assert block.header.timestamp > prev_block.header.timestamp
-            assert block.header.timestamp <= prev_block.header.timestamp + datetime.timedelta(minutes=10)
-        assert block.header.tx_root_hash == block.compute_tx_merkle_root()
+            assert block.header.timestamp <= prev_block.header.timestamp + datetime.timedelta(hours=1)
+        assert block.header.tx_root_hash == block.tx_root
 
         try:
             new_state = self._validate_txs(block.transactions, world_state)
         except Exception:
             raise
 
-        assert new_state.root_hash == block.header.state_root_hash
+        assert new_state.state_roots_hash == block.header.state_root_hash
         new_state.execute_reward_modification(block.header.beneficiary, 500)
 
         return new_state
@@ -244,3 +256,18 @@ class BlockChain(object):
                 raise
 
         return new_world_state
+
+    def validate_txs_on_current_state(self, txs: list[Transaction]) -> WorldState:
+        """Validates sequence of transactions against current state and calculates modified world state.
+
+        Checks:
+            lookup _validate_txs(...)
+
+        :param txs: list of Transactions
+        :type txs: list[Transaction]
+
+        :return: modified world state
+        :rtype: WorldState
+        """
+
+        return self._validate_txs(txs, self._state)

@@ -10,7 +10,7 @@ class Account(object):
 
     Public attributes:
         name — account unique identifier
-        root_hash — account state hash
+        state_roots_hash — account state hash
     Private attributes:
         _storage — key-value storage for _trie
         _trie — account state in Merkle Patricia trie
@@ -87,7 +87,7 @@ class Account(object):
 
         self._trie.update(key, value.to_bytes(32, 'big'))
 
-    def sub_asset(self, asset: Asset, ownership_type: AssetOwnershipType, amount: int):
+    def sub_asset(self, asset: Asset, ownership_type: AssetOwnershipType, amount: int) -> None:
         """Substracts arbitrary asset of arbitrary value from account.
 
         Typing assertions and assertions that value may not be < 0.
@@ -104,8 +104,7 @@ class Account(object):
 
         key = dsha256(asset.name + ownership_type.value).encode('utf-8')
 
-        if not self.check_asset(asset, ownership_type, amount):
-            raise
+        assert self.check_asset(asset, ownership_type, amount)
 
         prev_value = int.from_bytes(self._trie.get(key), 'big')
 

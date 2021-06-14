@@ -1,13 +1,13 @@
-from enum import Enum
-from typing import Union
-import copy
+from __future__ import annotations
 
-from crypto.hashing import dsha256
-from crypto.signatures import check_signature_ecdsa
+import copy
+from typing import Union
+
+from crypto.hashing import dsha256, keccak_hash
 from mpt import MerklePatriciaTrie
 from primitives.accounts import Account
 from primitives.assets import Asset, AssetOwnershipType, CREATE_ASSET, CURRENCY_ASSET, AssetStatus, UPDATE_ASSET
-from primitives.transactions import Transaction, TransactionTypes
+from primitives.transactions import Transaction
 from primitives.world_state_modifications import WorldStateModificationType
 
 
@@ -20,10 +20,10 @@ class WorldState(object):
     _assets: dict[bytes, Asset] = {}
 
     @property
-    def root_hash(self):
+    def state_roots_hash(self):
         return dsha256(self._accounts_trie.root_hash().hex() + self._assets_trie.root_hash().hex())
 
-    def __init__(self, storages: tuple[dict, dict] = None):
+    def __init__(self, storages: tuple[dict, dict] = None) -> None:
         if storages:
             self._accounts_storage = storages[0]
             self._assets_storage = storages[1]
@@ -31,7 +31,7 @@ class WorldState(object):
         self._accounts_trie = MerklePatriciaTrie(self._accounts_storage)
         self._assets_trie = MerklePatriciaTrie(self._assets_storage)
 
-    def _register_account_modification(self, account: Account):
+    def _register_account_modification(self, account: Account) -> None:
         assert isinstance(account, Account)
 
         key = account.name.encode('utf-8')
@@ -39,7 +39,7 @@ class WorldState(object):
         self._accounts_trie.update(key, account.root_hash)
         self._accounts[key] = account
 
-    def _register_asset_modification(self, asset: Asset):
+    def _register_asset_modification(self, asset: Asset) -> None:
         assert isinstance(asset, Asset)
 
         key = asset.name.encode('utf-8')
@@ -52,7 +52,7 @@ class WorldState(object):
             account_name = account_name.encode('utf-8')
         return account_name in self._accounts
 
-    def execute_tx(self, tx: Transaction):
+    def execute_tx(self, tx: Transaction) -> WorldState:
         """Executes tx against current state and returns modified copy.
 
         Deepcopies current state,
@@ -76,7 +76,7 @@ class WorldState(object):
 
         return _new_world_state
 
-    def _execute_state_modification(self, modification: WorldStateModificationType, **kwargs):
+    def _execute_state_modification(self, modification: WorldStateModificationType, **kwargs) -> None:
         """Executes arbitrary state modification instruction on self state.
 
         :param author_name:
@@ -184,7 +184,7 @@ class WorldState(object):
         else:
             raise RuntimeError
 
-    def execute_reward_modification(self, beneficiary: Union[str, bytes], amount: int):
+    def execute_reward_modification(self, beneficiary: Union[str, bytes], amount: int) -> None:
         assert isinstance(beneficiary, (str, bytes))
         if isinstance(beneficiary, str):
             beneficiary.encode('utf-8')
@@ -203,7 +203,7 @@ class WorldState(object):
 
         self._register_account_modification(account)
 
-    def prepare_for_genesis(self, me: str):
+    def prepare_for_genesis(self, me: str) -> None:
 
         self._register_asset_modification(CURRENCY_ASSET)
         self._register_asset_modification(CREATE_ASSET)

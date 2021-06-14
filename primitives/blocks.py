@@ -2,7 +2,7 @@ import datetime
 import json
 
 from primitives.transactions import Transaction
-from crypto.hashing import dsha256
+from crypto.hashing import dsha256, keccak_hash
 
 
 class BlockHeader(object):
@@ -27,7 +27,7 @@ class BlockHeader(object):
         self.beneficiary = beneficiary
         self.target = target
         self.heigth = height
-        self.timestamp = timestamp.replace(microsecond=0)
+        self.timestamp = timestamp.astimezone(datetime.timezone.utc).replace(microsecond=0)
         if state_root:
             self.state_root_hash = state_root
         if tx_root:
@@ -103,11 +103,16 @@ class Block(object):
     def hash(self):
         return self.header.hash
 
+    @property
+    def tx_root(self):
+        return self._compute_tx_merkle_root(self.transactions)
+
     def mine(self):
         while int(self.hash, 16) > self.header.target:
             self.header.nonce = self.header.nonce + 1
 
-    def compute_tx_merkle_root(self):
+    @staticmethod
+    def _compute_tx_merkle_root(txs: list[Transaction]) -> str:
         def compute_merkle_nodes(_hashes: list[str]) -> list[str]:
             if not len(_hashes) % 2:
                 _hashes.append(_hashes[-1])
@@ -115,10 +120,10 @@ class Block(object):
                                                          [v for i, v in enumerate(_hashes) if i % 2])]
             return _hashes
 
-        if not self.transactions:
+        if not txs:
             return '0' * 64
-        assert isinstance(self.header, BlockHeader)
-        hashes = [tx.hash for tx in self.transactions]
+
+        hashes = [tx.hash for tx in txs]
         while len(hashes) != 1:
             hashes = compute_merkle_nodes(hashes)
 
@@ -132,9 +137,9 @@ class Block(object):
         self.transactions = transactions
 
         if self.header.tx_root_hash:
-            assert self.header.tx_root_hash == self.compute_tx_merkle_root()
+            assert self.header.tx_root_hash == self.tx_root
         else:
-            self.header.tx_root_hash = self.compute_tx_merkle_root()
+            self.header.tx_root_hash = self.tx_root
 
     def __repr__(self):
         return f'{type(self).__name__}({self.header}, {len(self.transactions)} txs)'
